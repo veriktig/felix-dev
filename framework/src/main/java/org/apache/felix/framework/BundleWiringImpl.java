@@ -29,7 +29,6 @@ import org.apache.felix.framework.util.Util;
 import org.apache.felix.framework.util.manifestparser.ManifestParser;
 import org.apache.felix.framework.util.manifestparser.NativeLibrary;
 import org.apache.felix.framework.wiring.BundleRequirementImpl;
-import org.codehaus.mojo.animal_sniffer.IgnoreJRERequirement;
 import org.osgi.framework.Bundle;
 import org.osgi.framework.BundleException;
 import org.osgi.framework.BundleReference;
@@ -1919,7 +1918,6 @@ public class BundleWiringImpl implements BundleWiring
             m_isParallel = registerAsParallel();
         }
 
-        @IgnoreJRERequirement
         private static boolean registerAsParallel()
         {
             boolean registered = false;

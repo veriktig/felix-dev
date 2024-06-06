@@ -33,7 +33,6 @@ import org.apache.felix.framework.util.manifestparser.NativeLibraryClause;
 import org.apache.felix.framework.wiring.BundleCapabilityImpl;
 import org.apache.felix.framework.wiring.BundleRequirementImpl;
 import org.apache.felix.framework.wiring.BundleWireImpl;
-import org.codehaus.mojo.animal_sniffer.IgnoreJRERequirement;
 import org.osgi.framework.AdminPermission;
 import org.osgi.framework.Bundle;
 import org.osgi.framework.BundleActivator;
@@ -234,7 +233,6 @@ class ExtensionManager implements Content
         return new BundleCapabilityImpl(revision, NativeNamespace.NATIVE_NAMESPACE, Collections.<String, String> emptyMap(), attributes);
     }
 
-    @IgnoreJRERequirement
     void updateRevision(Felix felix, Map configMap)
     {
         Map config = new HashMap(configMap);

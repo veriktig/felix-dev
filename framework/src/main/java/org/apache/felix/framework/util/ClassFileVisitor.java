@@ -18,15 +18,12 @@
  */
 package org.apache.felix.framework.util;
 
-import org.codehaus.mojo.animal_sniffer.IgnoreJRERequirement;
-
 import java.io.IOException;
 import java.util.Set;
 import java.util.SortedMap;
 import java.util.SortedSet;
 import java.util.TreeSet;
 
-@IgnoreJRERequirement
 public class ClassFileVisitor extends java.nio.file.SimpleFileVisitor<java.nio.file.Path>
 {
     private final Set<String> m_imports;
