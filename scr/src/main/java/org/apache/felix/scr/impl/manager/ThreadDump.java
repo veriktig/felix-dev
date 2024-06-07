@@ -23,12 +23,9 @@ import java.lang.management.ThreadInfo;
 import java.lang.management.ThreadMXBean;
 import java.util.concurrent.Callable;
 
-import org.codehaus.mojo.animal_sniffer.IgnoreJRERequirement;
-
 public class ThreadDump implements Callable<String>
 {
 
-    @IgnoreJRERequirement
     public String call() throws Exception
     {
         ThreadMXBean threadMXBean = ManagementFactory.getThreadMXBean();
