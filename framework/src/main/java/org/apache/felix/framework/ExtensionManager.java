@@ -945,7 +945,8 @@ class ExtensionManager implements Content
             m_headerMap.put(FelixConstants.BUNDLE_MANIFESTVERSION, "2");
 
 
-            m_version = new Version((String) m_configMap.get(FelixConstants.FELIX_VERSION_PROPERTY));
+            //m_version = new Version((String) m_configMap.get(FelixConstants.FELIX_VERSION_PROPERTY));
+            m_version = new Version(FelixConstants.SYSTEM_BUNDLE_VERSION);
 
             try
             {
