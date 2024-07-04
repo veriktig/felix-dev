@@ -21,8 +21,8 @@ package org.apache.felix.framework.util;
 public interface FelixConstants extends org.osgi.framework.Constants
 {
     //String SYSTEM_BUNDLE_SYMBOLICNAME = "org.apache.felix.framework";
-    String SYSTEM_BUNDLE_SYMBOLICNAME = "__SCLAUNCHER_NAME__";
-    String SYSTEM_BUNDLE_VERSION = "__SCLAUNCHER_VERSION__";
+    String SYSTEM_BUNDLE_SYMBOLICNAME = "__NAME__";
+    String SYSTEM_BUNDLE_VERSION = "__VERSION__";
 
     // Framework constants and values.
     String FRAMEWORK_VERSION_VALUE = "1.9";
