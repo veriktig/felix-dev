@@ -231,7 +231,6 @@ class ExtensionManager implements Content
         return new BundleCapabilityImpl(revision, NativeNamespace.NATIVE_NAMESPACE, Collections.<String, String> emptyMap(), attributes);
     }
 
-    @IgnoreJRERequirement
     void updateRevision(Felix felix, Map<String,?> configMap)
     {
         Map<String,Object> config = new HashMap<>(configMap);
