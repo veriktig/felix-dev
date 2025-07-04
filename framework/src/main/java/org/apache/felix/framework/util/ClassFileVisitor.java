@@ -58,7 +58,7 @@ public class ClassFileVisitor extends java.nio.file.SimpleFileVisitor<java.nio.f
                         refs.remove(name);
                         if (strings == null)
                         {
-                            strings = new TreeSet<String>(refs);
+                            strings = new TreeSet<>(refs);
                             m_result.put(name, strings);
                         }
                         else
@@ -73,7 +73,7 @@ public class ClassFileVisitor extends java.nio.file.SimpleFileVisitor<java.nio.f
                 }
                 else if (strings == null)
                 {
-                    m_result.put(name, new TreeSet<String>());
+                    m_result.put(name, new TreeSet<>());
                 }
             }
         }

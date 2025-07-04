@@ -30,18 +30,23 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Dictionary;
 import java.util.Enumeration;
+import java.util.HashMap;
 import java.util.Hashtable;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
+
+import jakarta.servlet.SessionCookieConfig;
+import jakarta.servlet.SessionTrackingMode;
 
 import org.apache.felix.http.base.internal.HttpServiceController;
 import org.apache.felix.http.base.internal.logger.SystemLogger;
 import org.eclipse.jetty.alpn.server.ALPNServerConnectionFactory;
 import org.eclipse.jetty.ee10.servlet.ServletContextHandler;
+import org.eclipse.jetty.ee10.servlet.ServletHandler;
 import org.eclipse.jetty.ee10.servlet.ServletHolder;
 import org.eclipse.jetty.ee10.servlet.SessionHandler;
-import org.eclipse.jetty.ee10.servlet.ServletHandler;
 import org.eclipse.jetty.http.HttpVersion;
 import org.eclipse.jetty.http.UriCompliance;
 import org.eclipse.jetty.http2.server.HTTP2ServerConnectionFactory;
@@ -56,6 +61,7 @@ import org.eclipse.jetty.server.Server;
 import org.eclipse.jetty.server.ServerConnector;
 import org.eclipse.jetty.server.SslConnectionFactory;
 import org.eclipse.jetty.server.handler.ContextHandlerCollection;
+import org.eclipse.jetty.server.handler.SizeLimitHandler;
 import org.eclipse.jetty.server.handler.StatisticsHandler;
 import org.eclipse.jetty.server.handler.gzip.GzipHandler;
 import org.eclipse.jetty.session.HouseKeeper;
@@ -70,9 +76,6 @@ import org.osgi.framework.InvalidSyntaxException;
 import org.osgi.framework.ServiceFactory;
 import org.osgi.framework.ServiceRegistration;
 import org.osgi.service.servlet.runtime.HttpServiceRuntimeConstants;
-
-import jakarta.servlet.SessionCookieConfig;
-import jakarta.servlet.SessionTrackingMode;
 
 public final class JettyService
 {
@@ -309,7 +312,14 @@ public final class JettyService
             loginService.setUserStore(new UserStore());
             this.server.addBean(loginService);
 
-            ServletContextHandler context = new ServletContextHandler(this.config.getContextPath(),                    
+            // Check if custom headers are configured for Jetty error pages
+            // If so, split them on ## and pass as map to the JettyErrorHandler
+            final String errorPageCustomHeaders = this.config.getFelixJettyErrorPageCustomHeaders();
+            if (errorPageCustomHeaders != null) {
+                addErrorHandler(errorPageCustomHeaders);
+            }
+
+            ServletContextHandler context = new ServletContextHandler(this.config.getContextPath(),
                     ServletContextHandler.SESSIONS);
 
             this.parent = new ContextHandlerCollection(context);
@@ -323,6 +333,14 @@ public final class JettyService
             holder.setAsyncSupported(true);
             context.addServlet(holder, "/*");
             context.setMaxFormContentSize(this.config.getMaxFormSize());
+
+            int requestSizeLimit = this.config.getRequestSizeLimit();
+            int responseSizeLimit = this.config.getResponseSizeLimit();
+            if (requestSizeLimit > -1 || responseSizeLimit > -1) {
+                // Use SizeLimitHandler to limit the size of the request body and response
+                // -1 is unlimited
+                context.setHandler(new SizeLimitHandler(requestSizeLimit, responseSizeLimit));
+            }
 
             if (this.config.isRegisterMBeans())
             {
@@ -460,6 +478,21 @@ public final class JettyService
         {
             SystemLogger.LOGGER.warn("Jetty not started (HTTP and HTTPS disabled)");
         }
+    }
+
+    private void addErrorHandler(String errorPageCustomHeaders) {
+            final String[] customHeaders = errorPageCustomHeaders.split("##");
+            final Map<String, String> headers = new HashMap<>();
+            for (String customHeader : customHeaders) {
+                if (customHeader == null || !customHeader.contains("=") || customHeader.endsWith("=")) {
+                    SystemLogger.LOGGER.warn("Ignoring invalid error page custom header: {}", customHeader);
+                    continue;
+                }
+                final String key = customHeader.substring(0, customHeader.indexOf("="));
+                final String value = customHeader.substring(customHeader.indexOf("=") + 1);
+                headers.put(key.trim(), value.trim());
+            }
+            this.server.setErrorHandler(new JettyErrorHandler(headers));
     }
 
     private static String fixJettyVersion(final BundleContext ctx)
@@ -709,7 +742,8 @@ public final class JettyService
         config.setRequestHeaderSize(this.config.getHeaderSize());
         config.setResponseHeaderSize(this.config.getHeaderSize());
         config.setOutputBufferSize(this.config.getResponseBufferSize());
- 
+        config.setRelativeRedirectAllowed(this.config.getBooleanProperty(JettyConfig.FELIX_JETTY_ALLOW_RELATIVE_REDIRECTS, true));
+
         String uriComplianceMode = this.config.getProperty(JettyConfig.FELIX_JETTY_URI_COMPLIANCE_MODE, null);
         if (uriComplianceMode != null) {
             try {
