@@ -33,6 +33,7 @@ import org.osgi.framework.ServiceEvent;
  * @author $Id: b8c500c6f09cc25e3a6294489b7e6a1d458d5e6f $
  */
 @ConsumerType
+@Deprecated
 public interface EventHook {
 	/**
 	 * Event hook method. This method is called prior to service event delivery

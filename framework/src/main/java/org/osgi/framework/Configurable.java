@@ -28,6 +28,7 @@ package org.osgi.framework;
  * @deprecated As of 1.2. Please use Configuration Admin service.
  * @author $Id: dce95833dd076e870099385a306989959a84aafd $
  */
+@Deprecated
 public interface Configurable {
 	/**
 	 * Returns this service's configuration object.
@@ -46,5 +47,6 @@ public interface Configurable {
 	 *         permission and the Java Runtime Environment supports permissions.
 	 * @deprecated As of 1.2. Please use Configuration Admin service.
 	 */
+    @Deprecated
 	public Object getConfigurationObject();
 }

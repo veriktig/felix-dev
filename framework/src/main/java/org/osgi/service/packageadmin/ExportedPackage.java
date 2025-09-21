@@ -47,6 +47,7 @@ import org.osgi.framework.Version;
  *             <code>org.osgi.framework.wiring</code> package.
  * @author $Id: f4cdb9e84ce788c16d5304166a2b9eeecb5fabf3 $
  */
+@Deprecated
 public interface ExportedPackage {
 	/**
 	 * Returns the name of the package associated with this exported package.
@@ -87,6 +88,7 @@ public interface ExportedPackage {
 	 *         version information is available.
 	 * @deprecated As of 1.2. Replaced by {@link #getVersion()}.
 	 */
+    @Deprecated
 	public String getSpecificationVersion();
 
 	/**

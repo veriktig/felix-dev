@@ -87,105 +87,305 @@ public class EventDispatcher
     {
         synchronized (m_threadLock)
         {
-            // Start event dispatching thread if necessary.
-            if (m_thread == null || !m_thread.isAlive())
-            {
-                m_stopping = false;
+        // Start event dispatching thread if necessary.
+        if (m_thread == null || !m_thread.isAlive())
+        {
+            m_stopping = false;
 
-                m_thread = new Thread(new Runnable() {
-                    @Override
-                    public void run()
+            m_thread = new Thread(new Runnable() {
+                @Override
+                public void run()
+                {
+                    try
                     {
-                        try
+                        EventDispatcher.run();
+                    }
+                    finally
+                    {
+                        // Ensure we update state even if stopped by external cause
+                        // e.g. an Applet VM forceably killing threads
+                        synchronized (m_threadLock)
                         {
-                            EventDispatcher.run();
-                        }
-                        finally
-                        {
-                            // Ensure we update state even if stopped by external cause
-                            // e.g. an Applet VM forceably killing threads
-                            synchronized (m_threadLock)
-                            {
-                                m_thread = null;
-                                m_stopping = false;
-                                m_references = 0;
-                                m_threadLock.notifyAll();
-                            }
+                            m_thread = null;
+                            m_stopping = false;
+                            m_references = 0;
+                            m_threadLock.notifyAll();
                         }
                     }
-                }, "FelixDispatchQueue");
-                m_thread.start();
-            }
+                }
+            }, "FelixDispatchQueue");
+            m_thread.start();
+        }
 
-            // reference counting and flags
-            m_references++;
+        // reference counting and flags
+        m_references++;
+    }
+}
+
+public void stopDispatching()
+{
+    synchronized (m_threadLock)
+    {
+        // Return if already dead or stopping.
+        if (m_thread == null || m_stopping)
+        {
+            return;
+        }
+
+        // decrement use counter, don't continue if there are users
+        m_references--;
+        if (m_references > 0)
+        {
+            return;
+        }
+
+        m_stopping = true;
+    }
+
+    // Signal dispatch thread.
+    synchronized (m_requestList)
+    {
+        m_requestList.notify();
+    }
+
+    // Use separate lock for shutdown to prevent any chance of nested lock deadlock
+    synchronized (m_threadLock)
+    {
+        while (m_thread != null)
+        {
+            try
+            {
+                m_threadLock.wait();
+            }
+            catch (InterruptedException ex)
+            {
+            }
+        }
+    }
+}
+
+public Filter addListener(BundleContext bc, Class<?> clazz, EventListener l, Filter filter)
+{
+    // Verify the listener.
+    if (l == null)
+    {
+        throw new IllegalArgumentException("Listener is null");
+    }
+    else if (!clazz.isInstance(l))
+    {
+        throw new IllegalArgumentException(
+            "Listener not of type " + clazz.getName());
+    }
+
+    // See if we can simply update the listener, if so then
+    // return immediately.
+    Filter oldFilter = updateListener(bc, clazz, l, filter);
+    if (oldFilter != null)
+    {
+        return oldFilter;
+    }
+
+    // Lock the object to add the listener.
+    synchronized (this)
+    {
+        // Verify that the bundle context is still valid.
+        try
+        {
+            bc.getBundle();
+        }
+        catch (IllegalStateException ex)
+        {
+            // Bundle context is no longer valid, so just return.
+            return null;
+        }
+
+        Map<BundleContext, List<ListenerInfo>> listeners = null;
+
+        if (clazz == FrameworkListener.class)
+        {
+            listeners = m_fwkListeners;
+        }
+        else if (clazz == BundleListener.class)
+        {
+            if (SynchronousBundleListener.class.isInstance(l))
+            {
+                listeners = m_syncBndlListeners;
+            }
+            else
+            {
+                listeners = m_bndlListeners;
+            }
+        }
+        else if (clazz == ServiceListener.class)
+        {
+            // We need to create a Set for keeping track of matching service
+            // registrations so we can fire ServiceEvent.MODIFIED_ENDMATCH
+            // events. We need a Set even if filter is null, since the
+            // listener can be updated and have a filter added later.
+            listeners = m_svcListeners;
+        }
+        else
+        {
+            throw new IllegalArgumentException("Unknown listener: " + l.getClass());
+        }
+
+        // Add listener.
+        ListenerInfo info =
+            new ListenerInfo(bc.getBundle(), bc, clazz, l, filter, null, false);
+        listeners = addListenerInfo(listeners, info);
+
+        if (clazz == FrameworkListener.class)
+        {
+            m_fwkListeners = listeners;
+        }
+        else if (clazz == BundleListener.class)
+        {
+            if (SynchronousBundleListener.class.isInstance(l))
+            {
+                m_syncBndlListeners = listeners;
+            }
+            else
+            {
+                m_bndlListeners = listeners;
+            }
+        }
+        else if (clazz == ServiceListener.class)
+        {
+            m_svcListeners = listeners;
+        }
+    }
+    return null;
+}
+
+public ListenerHook.ListenerInfo removeListener(
+    BundleContext bc, Class<?> clazz, EventListener l)
+{
+    ListenerHook.ListenerInfo returnInfo = null;
+
+    // Verify listener.
+    if (l == null)
+    {
+        throw new IllegalArgumentException("Listener is null");
+    }
+    else if (!clazz.isInstance(l))
+    {
+        throw new IllegalArgumentException(
+            "Listener not of type " + clazz.getName());
+    }
+
+    // Lock the object to remove the listener.
+    synchronized (this)
+    {
+        Map<BundleContext, List<ListenerInfo>> listeners = null;
+
+        if (clazz == FrameworkListener.class)
+        {
+            listeners = m_fwkListeners;
+        }
+        else if (clazz == BundleListener.class)
+        {
+            if (SynchronousBundleListener.class.isInstance(l))
+            {
+                listeners = m_syncBndlListeners;
+            }
+            else
+            {
+                listeners = m_bndlListeners;
+            }
+        }
+        else if (clazz == ServiceListener.class)
+        {
+            listeners = m_svcListeners;
+        }
+        else
+        {
+            throw new IllegalArgumentException("Unknown listener: " + l.getClass());
+        }
+
+        // Try to find the instance in our list.
+        int idx = -1;
+        for (Entry<BundleContext, List<ListenerInfo>> entry : listeners.entrySet())
+        {
+            List<ListenerInfo> infos = entry.getValue();
+            for (int i = 0; i < infos.size(); i++)
+            {
+                ListenerInfo info = infos.get(i);
+                if (info.getBundleContext().equals(bc) &&
+                    (info.getListenerClass() == clazz) &&
+                    (info.getListener() == l))
+                {
+                    // For service listeners, we must return some info about
+                    // the listener for the ListenerHook callback.
+                    if (ServiceListener.class == clazz)
+                    {
+                        returnInfo = new ListenerInfo(infos.get(i), true);
+                    }
+                    idx = i;
+                    break;
+                }
+            }
+        }
+
+        // If we have the instance, then remove it.
+        if (idx >= 0)
+        {
+            listeners = removeListenerInfo(listeners, bc, idx);
+        }
+
+        if (clazz == FrameworkListener.class)
+        {
+            m_fwkListeners = listeners;
+        }
+        else if (clazz == BundleListener.class)
+        {
+            if (SynchronousBundleListener.class.isInstance(l))
+            {
+                m_syncBndlListeners = listeners;
+            }
+            else
+            {
+                m_bndlListeners = listeners;
+            }
+        }
+        else if (clazz == ServiceListener.class)
+        {
+            m_svcListeners = listeners;
         }
     }
 
-    public void stopDispatching()
+    // Return information about the listener; this is null
+    // for everything but service listeners.
+    return returnInfo;
+}
+
+public void removeListeners(BundleContext bc)
+{
+    if (bc == null)
     {
-        synchronized (m_threadLock)
-        {
-            // Return if already dead or stopping.
-            if (m_thread == null || m_stopping)
-            {
-                return;
-            }
-
-            // decrement use counter, don't continue if there are users
-            m_references--;
-            if (m_references > 0)
-            {
-                return;
-            }
-
-            m_stopping = true;
-        }
-
-        // Signal dispatch thread.
-        synchronized (m_requestList)
-        {
-            m_requestList.notify();
-        }
-
-        // Use separate lock for shutdown to prevent any chance of nested lock deadlock
-        synchronized (m_threadLock)
-        {
-            while (m_thread != null)
-            {
-                try
-                {
-                    m_threadLock.wait();
-                }
-                catch (InterruptedException ex)
-                {
-                }
-            }
-        }
+        return;
     }
 
-    public Filter addListener(BundleContext bc, Class<?> clazz, EventListener l, Filter filter)
+    synchronized (this)
     {
-        // Verify the listener.
-        if (l == null)
-        {
-            throw new IllegalArgumentException("Listener is null");
-        }
-        else if (!clazz.isInstance(l))
-        {
-            throw new IllegalArgumentException(
-                "Listener not of type " + clazz.getName());
-        }
+        // Remove all framework listeners associated with the specified bundle.
+        m_fwkListeners = removeListenerInfos(m_fwkListeners, bc);
 
-        // See if we can simply update the listener, if so then
-        // return immediately.
-        Filter oldFilter = updateListener(bc, clazz, l, filter);
-        if (oldFilter != null)
-        {
-            return oldFilter;
-        }
+        // Remove all bundle listeners associated with the specified bundle.
+        m_bndlListeners = removeListenerInfos(m_bndlListeners, bc);
 
-        // Lock the object to add the listener.
+        // Remove all synchronous bundle listeners associated with
+        // the specified bundle.
+        m_syncBndlListeners = removeListenerInfos(m_syncBndlListeners, bc);
+
+        // Remove all service listeners associated with the specified bundle.
+        m_svcListeners = removeListenerInfos(m_svcListeners, bc);
+    }
+}
+
+public Filter updateListener(BundleContext bc, Class<?> clazz, EventListener l, Filter filter)
+{
+    if (clazz == ServiceListener.class)
+    {
         synchronized (this)
         {
             // Verify that the bundle context is still valid.
@@ -196,293 +396,160 @@ public class EventDispatcher
             catch (IllegalStateException ex)
             {
                 // Bundle context is no longer valid, so just return.
-                return null;
             }
 
-            Map<BundleContext, List<ListenerInfo>> listeners = null;
-            Object acc = null;
-
-            if (clazz == FrameworkListener.class)
+            // See if the service listener is already registered; if so then
+            // update its filter per the spec.
+            List<ListenerInfo> infos = m_svcListeners.get(bc);
+            for (int i = 0; (infos != null) && (i < infos.size()); i++)
             {
-                listeners = m_fwkListeners;
-            }
-            else if (clazz == BundleListener.class)
-            {
-                if (SynchronousBundleListener.class.isInstance(l))
+                ListenerInfo info = infos.get(i);
+                if (info.getBundleContext().equals(bc) &&
+                    (info.getListenerClass() == clazz) &&
+                    (info.getListener() == l))
                 {
-                    listeners = m_syncBndlListeners;
-                }
-                else
-                {
-                    listeners = m_bndlListeners;
-                }
-            }
-            else if (clazz == ServiceListener.class)
-            {
-                // Remember security context for filtering service events.
-                Object sm = System.getSecurityManager();
-                if (sm != null)
-                {
-                    acc = ((SecurityManager) sm).getSecurityContext();
-                }
-                // We need to create a Set for keeping track of matching service
-                // registrations so we can fire ServiceEvent.MODIFIED_ENDMATCH
-                // events. We need a Set even if filter is null, since the
-                // listener can be updated and have a filter added later.
-                listeners = m_svcListeners;
-            }
-            else
-            {
-                throw new IllegalArgumentException("Unknown listener: " + l.getClass());
-            }
-
-            // Add listener.
-            ListenerInfo info =
-                new ListenerInfo(bc.getBundle(), bc, clazz, l, filter, acc, false);
-            listeners = addListenerInfo(listeners, info);
-
-            if (clazz == FrameworkListener.class)
-            {
-                m_fwkListeners = listeners;
-            }
-            else if (clazz == BundleListener.class)
-            {
-                if (SynchronousBundleListener.class.isInstance(l))
-                {
-                    m_syncBndlListeners = listeners;
-                }
-                else
-                {
-                    m_bndlListeners = listeners;
+                    // The spec says to update the filter in this case.
+                    Filter oldFilter = info.getParsedFilter();
+                    ListenerInfo newInfo = new ListenerInfo(
+                        info.getBundle(),
+                        info.getBundleContext(),
+                        info.getListenerClass(),
+                        info.getListener(),
+                        filter,
+                        info.getSecurityContext(),
+                        info.isRemoved());
+                    m_svcListeners = updateListenerInfo(m_svcListeners, i, newInfo);
+                    return oldFilter;
                 }
             }
-            else if (clazz == ServiceListener.class)
-            {
-                m_svcListeners = listeners;
-            }
-        }
-        return null;
-    }
-
-    public ListenerHook.ListenerInfo removeListener(
-        BundleContext bc, Class<?> clazz, EventListener l)
-    {
-        ListenerHook.ListenerInfo returnInfo = null;
-
-        // Verify listener.
-        if (l == null)
-        {
-            throw new IllegalArgumentException("Listener is null");
-        }
-        else if (!clazz.isInstance(l))
-        {
-            throw new IllegalArgumentException(
-                "Listener not of type " + clazz.getName());
-        }
-
-        // Lock the object to remove the listener.
-        synchronized (this)
-        {
-            Map<BundleContext, List<ListenerInfo>> listeners = null;
-
-            if (clazz == FrameworkListener.class)
-            {
-                listeners = m_fwkListeners;
-            }
-            else if (clazz == BundleListener.class)
-            {
-                if (SynchronousBundleListener.class.isInstance(l))
-                {
-                    listeners = m_syncBndlListeners;
-                }
-                else
-                {
-                    listeners = m_bndlListeners;
-                }
-            }
-            else if (clazz == ServiceListener.class)
-            {
-                listeners = m_svcListeners;
-            }
-            else
-            {
-                throw new IllegalArgumentException("Unknown listener: " + l.getClass());
-            }
-
-            // Try to find the instance in our list.
-            int idx = -1;
-            for (Entry<BundleContext, List<ListenerInfo>> entry : listeners.entrySet())
-            {
-                List<ListenerInfo> infos = entry.getValue();
-                for (int i = 0; i < infos.size(); i++)
-                {
-                    ListenerInfo info = infos.get(i);
-                    if (info.getBundleContext().equals(bc) &&
-                        (info.getListenerClass() == clazz) &&
-                        (info.getListener() == l))
-                    {
-                        // For service listeners, we must return some info about
-                        // the listener for the ListenerHook callback.
-                        if (ServiceListener.class == clazz)
-                        {
-                            returnInfo = new ListenerInfo(infos.get(i), true);
-                        }
-                        idx = i;
-                        break;
-                    }
-                }
-            }
-
-            // If we have the instance, then remove it.
-            if (idx >= 0)
-            {
-                listeners = removeListenerInfo(listeners, bc, idx);
-            }
-
-            if (clazz == FrameworkListener.class)
-            {
-                m_fwkListeners = listeners;
-            }
-            else if (clazz == BundleListener.class)
-            {
-                if (SynchronousBundleListener.class.isInstance(l))
-                {
-                    m_syncBndlListeners = listeners;
-                }
-                else
-                {
-                    m_bndlListeners = listeners;
-                }
-            }
-            else if (clazz == ServiceListener.class)
-            {
-                m_svcListeners = listeners;
-            }
-        }
-
-        // Return information about the listener; this is null
-        // for everything but service listeners.
-        return returnInfo;
-    }
-
-    public void removeListeners(BundleContext bc)
-    {
-        if (bc == null)
-        {
-            return;
-        }
-
-        synchronized (this)
-        {
-            // Remove all framework listeners associated with the specified bundle.
-            m_fwkListeners = removeListenerInfos(m_fwkListeners, bc);
-
-            // Remove all bundle listeners associated with the specified bundle.
-            m_bndlListeners = removeListenerInfos(m_bndlListeners, bc);
-
-            // Remove all synchronous bundle listeners associated with
-            // the specified bundle.
-            m_syncBndlListeners = removeListenerInfos(m_syncBndlListeners, bc);
-
-            // Remove all service listeners associated with the specified bundle.
-            m_svcListeners = removeListenerInfos(m_svcListeners, bc);
         }
     }
 
-    public Filter updateListener(BundleContext bc, Class<?> clazz, EventListener l, Filter filter)
-    {
-        if (clazz == ServiceListener.class)
-        {
-            synchronized (this)
-            {
-                // Verify that the bundle context is still valid.
-                try
-                {
-                    bc.getBundle();
-                }
-                catch (IllegalStateException ex)
-                {
-                    // Bundle context is no longer valid, so just return.
-                }
+    return null;
+}
 
-                // See if the service listener is already registered; if so then
-                // update its filter per the spec.
-                List<ListenerInfo> infos = m_svcListeners.get(bc);
-                for (int i = 0; (infos != null) && (i < infos.size()); i++)
-                {
-                    ListenerInfo info = infos.get(i);
-                    if (info.getBundleContext().equals(bc) &&
-                        (info.getListenerClass() == clazz) &&
-                        (info.getListener() == l))
-                    {
-                        // The spec says to update the filter in this case.
-                        Filter oldFilter = info.getParsedFilter();
-                        ListenerInfo newInfo = new ListenerInfo(
-                            info.getBundle(),
-                            info.getBundleContext(),
-                            info.getListenerClass(),
-                            info.getListener(),
-                            filter,
-                            info.getSecurityContext(),
-                            info.isRemoved());
-                        m_svcListeners = updateListenerInfo(m_svcListeners, i, newInfo);
-                        return oldFilter;
-                    }
-                }
+/**
+ * Returns all existing service listener information into a collection of
+ * ListenerHook.ListenerInfo objects. This is used the first time a listener
+ * hook is registered to synchronize it with the existing set of listeners.
+ * @return Returns all existing service listener information into a collection of
+ *         ListenerHook.ListenerInfo objects
+**/
+public Collection<ListenerHook.ListenerInfo> getAllServiceListeners()
+{
+    List<ListenerHook.ListenerInfo> listeners = new ArrayList<>();
+    synchronized (this)
+    {
+        for (Entry<BundleContext, List<ListenerInfo>> entry : m_svcListeners.entrySet())
+        {
+            listeners.addAll(entry.getValue());
+        }
+    }
+    return listeners;
+}
+
+public void fireFrameworkEvent(FrameworkEvent event)
+{
+    // Take a snapshot of the listener array.
+    Map<BundleContext, List<ListenerInfo>> listeners = null;
+    synchronized (this)
+    {
+        listeners = m_fwkListeners;
+    }
+
+    // Fire all framework listeners on a separate thread.
+    fireEventAsynchronously(this, Request.FRAMEWORK_EVENT, listeners, event);
+}
+
+public void fireBundleEvent(BundleEvent event, Felix felix)
+{
+    // Take a snapshot of the listener array.
+    Map<BundleContext, List<ListenerInfo>> listeners = null;
+    Map<BundleContext, List<ListenerInfo>> syncListeners = null;
+    synchronized (this)
+    {
+        listeners = m_bndlListeners;
+        syncListeners = m_syncBndlListeners;
+    }
+
+    // Create a whitelist of bundle context for bundle listeners,
+    // if we have hooks.
+    Set<BundleContext> whitelist = createWhitelistFromHooks(event, felix,
+        listeners, syncListeners, org.osgi.framework.hooks.bundle.EventHook.class);
+
+    // If we have a whitelist, then create copies of only the whitelisted
+    // listeners.
+    if (whitelist != null)
+    {
+        Map<BundleContext, List<ListenerInfo>> copy =
+            new HashMap<>();
+        for (BundleContext bc : whitelist)
+        {
+            List<ListenerInfo> infos = listeners.get(bc);
+            if (infos != null)
+            {
+                copy.put(bc, infos);
             }
         }
-
-        return null;
-    }
-
-    /**
-     * Returns all existing service listener information into a collection of
-     * ListenerHook.ListenerInfo objects. This is used the first time a listener
-     * hook is registered to synchronize it with the existing set of listeners.
-     * @return Returns all existing service listener information into a collection of
-     *         ListenerHook.ListenerInfo objects
-    **/
-    public Collection<ListenerHook.ListenerInfo> getAllServiceListeners()
-    {
-        List<ListenerHook.ListenerInfo> listeners = new ArrayList<>();
-        synchronized (this)
+        listeners = copy;
+        copy = new HashMap<>();
+        for (BundleContext bc : whitelist)
         {
-            for (Entry<BundleContext, List<ListenerInfo>> entry : m_svcListeners.entrySet())
+            List<ListenerInfo> infos = syncListeners.get(bc);
+            if (infos != null)
             {
-                listeners.addAll(entry.getValue());
+                copy.put(bc, infos);
             }
         }
-        return listeners;
+        syncListeners = copy;
     }
 
-    public void fireFrameworkEvent(FrameworkEvent event)
-    {
-        // Take a snapshot of the listener array.
-        Map<BundleContext, List<ListenerInfo>> listeners = null;
-        synchronized (this)
-        {
-            listeners = m_fwkListeners;
-        }
+    // Fire synchronous bundle listeners immediately on the calling thread.
+    fireEventImmediately(
+        this, Request.BUNDLE_EVENT, syncListeners, event, null);
 
-        // Fire all framework listeners on a separate thread.
-        fireEventAsynchronously(this, Request.FRAMEWORK_EVENT, listeners, event);
+    // The spec says that asynchronous bundle listeners do not get events
+    // of types STARTING, STOPPING, or LAZY_ACTIVATION.
+    if ((event.getType() != BundleEvent.STARTING) &&
+        (event.getType() != BundleEvent.STOPPING) &&
+        (event.getType() != BundleEvent.LAZY_ACTIVATION))
+    {
+        // Fire asynchronous bundle listeners on a separate thread.
+        fireEventAsynchronously(
+            this, Request.BUNDLE_EVENT, listeners, event);
+    }
+}
+
+public void fireServiceEvent(
+    final ServiceEvent event, final Dictionary<String,?> oldProps, final Felix felix)
+{
+    // Take a snapshot of the listener array.
+    Map<BundleContext, List<ListenerInfo>> listeners = null;
+    synchronized (this)
+    {
+        listeners = m_svcListeners;
     }
 
-    public void fireBundleEvent(BundleEvent event, Felix felix)
-    {
-        // Take a snapshot of the listener array.
-        Map<BundleContext, List<ListenerInfo>> listeners = null;
-        Map<BundleContext, List<ListenerInfo>> syncListeners = null;
-        synchronized (this)
-        {
-            listeners = m_bndlListeners;
-            syncListeners = m_syncBndlListeners;
-        }
+    // Use service registry hooks to filter target listeners.
+    listeners = filterListenersUsingHooks(event, felix, listeners);
 
+    // Fire all service events immediately on the calling thread.
+    fireEventImmediately(
+        this, Request.SERVICE_EVENT, listeners, event, oldProps);
+}
+
+// TODO: OSGi R4.3 - This is ugly and inefficient.
+private Map<BundleContext, List<ListenerInfo>> filterListenersUsingHooks(
+    ServiceEvent event, Felix felix, Map<BundleContext, List<ListenerInfo>> listeners)
+{
+    Set<ServiceReference<org.osgi.framework.hooks.service.EventHook>> ehs =
+        m_registry.getHookRegistry().getHooks(org.osgi.framework.hooks.service.EventHook.class);
+    if (!ehs.isEmpty())
+    {
         // Create a whitelist of bundle context for bundle listeners,
         // if we have hooks.
         Set<BundleContext> whitelist = createWhitelistFromHooks(event, felix,
-            listeners, syncListeners, org.osgi.framework.hooks.bundle.EventHook.class);
+            listeners, null, org.osgi.framework.hooks.service.EventHook.class);
 
         // If we have a whitelist, then create copies of only the whitelisted
         // listeners.
@@ -492,530 +559,378 @@ public class EventDispatcher
                 new HashMap<>();
             for (BundleContext bc : whitelist)
             {
-                List<ListenerInfo> infos = listeners.get(bc);
-                if (infos != null)
-                {
-                    copy.put(bc, infos);
-                }
+                copy.put(bc, listeners.get(bc));
             }
             listeners = copy;
-            copy = new HashMap<>();
-            for (BundleContext bc : whitelist)
-            {
-                List<ListenerInfo> infos = syncListeners.get(bc);
-                if (infos != null)
-                {
-                    copy.put(bc, infos);
-                }
-            }
-            syncListeners = copy;
-        }
-
-        // Fire synchronous bundle listeners immediately on the calling thread.
-        fireEventImmediately(
-            this, Request.BUNDLE_EVENT, syncListeners, event, null);
-
-        // The spec says that asynchronous bundle listeners do not get events
-        // of types STARTING, STOPPING, or LAZY_ACTIVATION.
-        if ((event.getType() != BundleEvent.STARTING) &&
-            (event.getType() != BundleEvent.STOPPING) &&
-            (event.getType() != BundleEvent.LAZY_ACTIVATION))
-        {
-            // Fire asynchronous bundle listeners on a separate thread.
-            fireEventAsynchronously(
-                this, Request.BUNDLE_EVENT, listeners, event);
         }
     }
 
-    public void fireServiceEvent(
-        final ServiceEvent event, final Dictionary<String,?> oldProps, final Felix felix)
+    Set<ServiceReference<org.osgi.framework.hooks.service.EventListenerHook>> elhs =
+        m_registry.getHookRegistry().getHooks(org.osgi.framework.hooks.service.EventListenerHook.class);
+    if (!elhs.isEmpty())
     {
-        // Take a snapshot of the listener array.
-        Map<BundleContext, List<ListenerInfo>> listeners = null;
-        synchronized (this)
-        {
-            listeners = m_svcListeners;
-        }
+        List<ListenerInfo> systemBundleListeners = null;
 
-        // Use service registry hooks to filter target listeners.
-        listeners = filterListenersUsingHooks(event, felix, listeners);
-
-        // Fire all service events immediately on the calling thread.
-        fireEventImmediately(
-            this, Request.SERVICE_EVENT, listeners, event, oldProps);
-    }
-
-// TODO: OSGi R4.3 - This is ugly and inefficient.
-    private Map<BundleContext, List<ListenerInfo>> filterListenersUsingHooks(
-        ServiceEvent event, Felix felix, Map<BundleContext, List<ListenerInfo>> listeners)
-    {
-        Set<ServiceReference<org.osgi.framework.hooks.service.EventHook>> ehs =
-            m_registry.getHookRegistry().getHooks(org.osgi.framework.hooks.service.EventHook.class);
-        if (!ehs.isEmpty())
-        {
-            // Create a whitelist of bundle context for bundle listeners,
-            // if we have hooks.
-            Set<BundleContext> whitelist = createWhitelistFromHooks(event, felix,
-                listeners, null, org.osgi.framework.hooks.service.EventHook.class);
-
-            // If we have a whitelist, then create copies of only the whitelisted
-            // listeners.
-            if (whitelist != null)
-            {
-                Map<BundleContext, List<ListenerInfo>> copy =
-                    new HashMap<>();
-                for (BundleContext bc : whitelist)
-                {
-                    copy.put(bc, listeners.get(bc));
-                }
-                listeners = copy;
-            }
-        }
-
-        Set<ServiceReference<org.osgi.framework.hooks.service.EventListenerHook>> elhs =
-            m_registry.getHookRegistry().getHooks(org.osgi.framework.hooks.service.EventListenerHook.class);
-        if (!elhs.isEmpty())
-        {
-            List<ListenerInfo> systemBundleListeners = null;
-
-            // The mutable map is used to keep the lists that underpin the shrinkable collections.
-            Map<BundleContext, List<ListenerInfo>> mutableMap =
-                    new HashMap<>();
-            // Create map with shrinkable collections.
-            Map<BundleContext, Collection<ListenerHook.ListenerInfo>> shrinkableMap =
+        // The mutable map is used to keep the lists that underpin the shrinkable collections.
+        Map<BundleContext, List<ListenerInfo>> mutableMap =
                 new HashMap<>();
-            for (Entry<BundleContext, List<ListenerInfo>> entry : listeners.entrySet())
+        // Create map with shrinkable collections.
+        Map<BundleContext, Collection<ListenerHook.ListenerInfo>> shrinkableMap =
+            new HashMap<>();
+        for (Entry<BundleContext, List<ListenerInfo>> entry : listeners.entrySet())
+        {
+            BundleContext bc = entry.getKey();
+            ArrayList<ListenerInfo> mutableList = new ArrayList<>(entry.getValue());
+            mutableMap.put(bc, mutableList);
+
+            // We want to pass the list as a generic collection to Shrinkable Collection.
+            // Need to convert to raw type before we can do this...
+            ArrayList ml = mutableList;
+
+            Collection<ListenerHook.ListenerInfo> shrinkableCollection =
+                    new ShrinkableCollection<ListenerHook.ListenerInfo>(ml);
+            shrinkableMap.put(bc, shrinkableCollection);
+
+            // Keep a copy of the System Bundle Listeners, as they might be removed by the hooks, but we
+            // actually need to keep them in the end.
+            if (bc == felix._getBundleContext())
+                systemBundleListeners = new ArrayList<>(entry.getValue());
+        }
+        shrinkableMap =
+            new ShrinkableMap<>
+                (shrinkableMap);
+
+        for (ServiceReference<org.osgi.framework.hooks.service.EventListenerHook> sr : elhs)
+        {
+            if (felix != null)
             {
-                BundleContext bc = entry.getKey();
-                ArrayList<ListenerInfo> mutableList = new ArrayList<>(entry.getValue());
-                mutableMap.put(bc, mutableList);
-
-                // We want to pass the list as a generic collection to Shrinkable Collection.
-                // Need to convert to raw type before we can do this...
-                ArrayList ml = mutableList;
-
-                Collection<ListenerHook.ListenerInfo> shrinkableCollection =
-                        new ShrinkableCollection<ListenerHook.ListenerInfo>(ml);
-                shrinkableMap.put(bc, shrinkableCollection);
-
-                // Keep a copy of the System Bundle Listeners, as they might be removed by the hooks, but we
-                // actually need to keep them in the end.
-                if (bc == felix._getBundleContext())
-                    systemBundleListeners = new ArrayList<>(entry.getValue());
-            }
-            shrinkableMap =
-                new ShrinkableMap<>
-                    (shrinkableMap);
-
-            for (ServiceReference<org.osgi.framework.hooks.service.EventListenerHook> sr : elhs)
-            {
-                if (felix != null)
+                org.osgi.framework.hooks.service.EventListenerHook elh = null;
+                try
                 {
-                    org.osgi.framework.hooks.service.EventListenerHook elh = null;
+                    elh = m_registry.getService(felix, sr, false);
+                }
+                catch (Exception ex)
+                {
+                    // If we can't get the hook, then ignore it.
+                }
+                if (elh != null)
+                {
                     try
                     {
-                        elh = m_registry.getService(felix, sr, false);
+                        m_secureAction.invokeServiceEventListenerHook(
+                            elh, event, shrinkableMap);
                     }
-                    catch (Exception ex)
+                    catch (Throwable th)
                     {
-                        // If we can't get the hook, then ignore it.
+                        m_logger.log(sr, Logger.LOG_WARNING,
+                            "Problem invoking event hook", th);
                     }
-                    if (elh != null)
+                    finally
                     {
-                        try
-                        {
-                            m_secureAction.invokeServiceEventListenerHook(
-                                elh, event, shrinkableMap);
-                        }
-                        catch (Throwable th)
-                        {
-                            m_logger.log(sr, Logger.LOG_WARNING,
-                                "Problem invoking event hook", th);
-                        }
-                        finally
-                        {
-                            m_registry.ungetService(felix, sr, null);
-                        }
+                        m_registry.ungetService(felix, sr, null);
                     }
                 }
             }
+        }
 
 // TODO: OSGi R4.3 - Should check and only do this if there was a change.
 
-            // the listeners map should only contain List values, and not Shrinkable
-            // Collections. Therefore we create a new map from the lists that are
-            // the delegates for the Shrinkable Collections. Any changes made by the
-            // hooks will have propagated to these maps.
-            Map<BundleContext, List<ListenerInfo>> newMap =
-                new HashMap<>();
-            for (Map.Entry<BundleContext, Collection<ListenerHook.ListenerInfo>> entry : shrinkableMap.entrySet())
+        // the listeners map should only contain List values, and not Shrinkable
+        // Collections. Therefore we create a new map from the lists that are
+        // the delegates for the Shrinkable Collections. Any changes made by the
+        // hooks will have propagated to these maps.
+        Map<BundleContext, List<ListenerInfo>> newMap =
+            new HashMap<>();
+        for (Map.Entry<BundleContext, Collection<ListenerHook.ListenerInfo>> entry : shrinkableMap.entrySet())
+        {
+            if (!entry.getValue().isEmpty())
             {
-                if (!entry.getValue().isEmpty())
-                {
-                    newMap.put(entry.getKey(), mutableMap.get(entry.getKey()));
-                }
+                newMap.put(entry.getKey(), mutableMap.get(entry.getKey()));
             }
-
-            // Put the system bundle listeners back, because they really need to be called
-            // regardless whether they were removed by the hooks or not.
-            if (systemBundleListeners != null)
-                newMap.put(felix._getBundleContext(), systemBundleListeners);
-
-            listeners = newMap;
         }
 
-        return listeners;
+        // Put the system bundle listeners back, because they really need to be called
+        // regardless whether they were removed by the hooks or not.
+        if (systemBundleListeners != null)
+            newMap.put(felix._getBundleContext(), systemBundleListeners);
+
+        listeners = newMap;
     }
 
-    private <T> Set<BundleContext> createWhitelistFromHooks(
-        EventObject event, Felix felix,
-        Map<BundleContext, List<ListenerInfo>> listeners1,
-        Map<BundleContext, List<ListenerInfo>> listeners2,
-        Class<T> hookClass)
-    {
-        // Create a whitelist of bundle context, if we have hooks.
-        Set<BundleContext> whitelist = null;
-        Set<ServiceReference<T>> hooks = m_registry.getHookRegistry().getHooks(hookClass);
-        if (!hooks.isEmpty())
-        {
-            boolean systemBundleListener = false;
-            BundleContext systemBundleContext = felix._getBundleContext();
+    return listeners;
+}
 
-            whitelist = new HashSet<>();
-            for (Entry<BundleContext, List<ListenerInfo>> entry : listeners1.entrySet())
+private <T> Set<BundleContext> createWhitelistFromHooks(
+    EventObject event, Felix felix,
+    Map<BundleContext, List<ListenerInfo>> listeners1,
+    Map<BundleContext, List<ListenerInfo>> listeners2,
+    Class<T> hookClass)
+{
+    // Create a whitelist of bundle context, if we have hooks.
+    Set<BundleContext> whitelist = null;
+    Set<ServiceReference<T>> hooks = m_registry.getHookRegistry().getHooks(hookClass);
+    if (!hooks.isEmpty())
+    {
+        boolean systemBundleListener = false;
+        BundleContext systemBundleContext = felix._getBundleContext();
+
+        whitelist = new HashSet<>();
+        for (Entry<BundleContext, List<ListenerInfo>> entry : listeners1.entrySet())
+        {
+            whitelist.add(entry.getKey());
+            if (entry.getKey() == systemBundleContext)
+                systemBundleListener = true;
+        }
+        if (listeners2 != null)
+        {
+            for (Entry<BundleContext, List<ListenerInfo>> entry : listeners2.entrySet())
             {
                 whitelist.add(entry.getKey());
                 if (entry.getKey() == systemBundleContext)
                     systemBundleListener = true;
             }
-            if (listeners2 != null)
-            {
-                for (Entry<BundleContext, List<ListenerInfo>> entry : listeners2.entrySet())
-                {
-                    whitelist.add(entry.getKey());
-                    if (entry.getKey() == systemBundleContext)
-                        systemBundleListener = true;
-                }
-            }
+        }
 
-            int originalSize = whitelist.size();
-            ShrinkableCollection<BundleContext> shrinkable =
-                new ShrinkableCollection<>(whitelist);
-            for (ServiceReference<T> sr : hooks)
+        int originalSize = whitelist.size();
+        ShrinkableCollection<BundleContext> shrinkable =
+            new ShrinkableCollection<>(whitelist);
+        for (ServiceReference<T> sr : hooks)
+        {
+            if (felix != null)
             {
-                if (felix != null)
+                T eh = null;
+                try
                 {
-                    T eh = null;
+                    eh = m_registry.getService(felix, sr, false);
+                }
+                catch (Exception ex)
+                {
+                    // If we can't get the hook, then ignore it.
+                }
+                if (eh != null)
+                {
                     try
                     {
-                        eh = m_registry.getService(felix, sr, false);
-                    }
-                    catch (Exception ex)
-                    {
-                        // If we can't get the hook, then ignore it.
-                    }
-                    if (eh != null)
-                    {
-                        try
+                        if (eh instanceof org.osgi.framework.hooks.service.EventHook)
                         {
-                            if (eh instanceof org.osgi.framework.hooks.service.EventHook)
-                            {
-                                m_secureAction.invokeServiceEventHook(
-                                    (org.osgi.framework.hooks.service.EventHook) eh,
-                                    (ServiceEvent) event, shrinkable);
-                            }
-                            else if (eh instanceof org.osgi.framework.hooks.bundle.EventHook)
-                            {
-                                m_secureAction.invokeBundleEventHook(
-                                    (org.osgi.framework.hooks.bundle.EventHook) eh,
-                                    (BundleEvent) event, shrinkable);
-                            }
+                            m_secureAction.invokeServiceEventHook(
+                                (org.osgi.framework.hooks.service.EventHook) eh,
+                                (ServiceEvent) event, shrinkable);
                         }
-                        catch (Throwable th)
+                        else if (eh instanceof org.osgi.framework.hooks.bundle.EventHook)
                         {
-                            m_logger.log(sr, Logger.LOG_WARNING,
-                                "Problem invoking event hook", th);
-                        }
-                        finally
-                        {
-                            m_registry.ungetService(felix, sr, null);
-                        }
-                    }
-                }
-            }
-
-            if (systemBundleListener && !whitelist.contains(systemBundleContext))
-            {
-                // The system bundle cannot be removed from the listeners, so if it was
-                // removed, add it back in. Note that this cannot be prevented by the shrinkable
-                // since the effect of removing the system bundle from the listeners must be
-                // visible between the event hooks.
-                whitelist.add(systemBundleContext);
-            }
-
-            // If the whitelist hasn't changed, then null it to avoid having
-            // to do whitelist lookups during event delivery.
-            if (originalSize == whitelist.size())
-            {
-                whitelist = null;
-            }
-        }
-        return whitelist;
-    }
-
-    private static void fireEventAsynchronously(
-        EventDispatcher dispatcher, int type,
-        Map<BundleContext, List<ListenerInfo>> listeners,
-        EventObject event)
-    {
-        //TODO: should possibly check this within thread lock, seems to be ok though without
-        // If dispatch thread is stopped, then ignore dispatch request.
-        if (m_stopping || m_thread == null)
-        {
-            return;
-        }
-
-        // First get a request from the pool or create one if necessary.
-        Request req = null;
-        synchronized (m_requestPool)
-        {
-            if (m_requestPool.size() > 0)
-            {
-                req = m_requestPool.remove(0);
-            }
-            else
-            {
-                req = new Request();
-            }
-        }
-
-        // Initialize dispatch request.
-        req.m_dispatcher = dispatcher;
-        req.m_type = type;
-        req.m_listeners = listeners;
-        req.m_event = event;
-
-        // Lock the request list.
-        synchronized (m_requestList)
-        {
-            // Add our request to the list.
-            m_requestList.add(req);
-            // Notify the dispatch thread that there is work to do.
-            m_requestList.notify();
-        }
-    }
-
-    private static void fireEventImmediately(
-        EventDispatcher dispatcher, int type,
-        Map<BundleContext, List<ListenerInfo>> listeners,
-        EventObject event, Dictionary<String,?> oldProps)
-    {
-        if (!listeners.isEmpty())
-        {
-            // Notify appropriate listeners.
-            for (Entry<BundleContext, List<ListenerInfo>> entry : listeners.entrySet())
-            {
-                for (ListenerInfo info : entry.getValue())
-                {
-                    Bundle bundle = info.getBundle();
-                    EventListener l = info.getListener();
-                    Filter filter = info.getParsedFilter();
-                    Object acc = info.getSecurityContext();
-
-                    try
-                    {
-                        if (type == Request.FRAMEWORK_EVENT)
-                        {
-                            invokeFrameworkListenerCallback(bundle, l, event);
-                        }
-                        else if (type == Request.BUNDLE_EVENT)
-                        {
-                            invokeBundleListenerCallback(bundle, l, event);
-                        }
-                        else if (type == Request.SERVICE_EVENT)
-                        {
-                            invokeServiceListenerCallback(
-                                bundle, l, filter, acc, event, oldProps);
+                            m_secureAction.invokeBundleEventHook(
+                                (org.osgi.framework.hooks.bundle.EventHook) eh,
+                                (BundleEvent) event, shrinkable);
                         }
                     }
                     catch (Throwable th)
                     {
-                        if ((type != Request.FRAMEWORK_EVENT)
-                            || (((FrameworkEvent) event).getType() != FrameworkEvent.ERROR))
-                        {
-                            dispatcher.m_logger.log(bundle,
-                                Logger.LOG_ERROR,
-                                "EventDispatcher: Error during dispatch.", th);
-                            dispatcher.fireFrameworkEvent(
-                                new FrameworkEvent(FrameworkEvent.ERROR, bundle, th));
-                        }
+                        m_logger.log(sr, Logger.LOG_WARNING,
+                            "Problem invoking event hook", th);
+                    }
+                    finally
+                    {
+                        m_registry.ungetService(felix, sr, null);
                     }
                 }
             }
         }
-    }
 
-    private static void invokeFrameworkListenerCallback(
-        Bundle bundle, final EventListener l, final EventObject event)
-    {
-        // The spec says only active bundles receive asynchronous events,
-        // but we will include starting bundles too otherwise
-        // it is impossible to see everything.
-        if ((bundle.getState() == Bundle.STARTING) ||
-            (bundle.getState() == Bundle.ACTIVE))
+        if (systemBundleListener && !whitelist.contains(systemBundleContext))
         {
-            if (System.getSecurityManager() != null)
-            {
-                AccessController.doPrivileged(new PrivilegedAction() {
-                    @Override
-                    public Object run()
-                    {
-                        ((FrameworkListener) l).frameworkEvent((FrameworkEvent) event);
-                        return null;
-                    }
-                });
-            }
-            else
-            {
-                ((FrameworkListener) l).frameworkEvent((FrameworkEvent) event);
-            }
+            // The system bundle cannot be removed from the listeners, so if it was
+            // removed, add it back in. Note that this cannot be prevented by the shrinkable
+            // since the effect of removing the system bundle from the listeners must be
+            // visible between the event hooks.
+            whitelist.add(systemBundleContext);
+        }
+
+        // If the whitelist hasn't changed, then null it to avoid having
+        // to do whitelist lookups during event delivery.
+        if (originalSize == whitelist.size())
+        {
+            whitelist = null;
         }
     }
+    return whitelist;
+}
 
-    private static void invokeBundleListenerCallback(
-        Bundle bundle, final EventListener l, final EventObject event)
+private static void fireEventAsynchronously(
+    EventDispatcher dispatcher, int type,
+    Map<BundleContext, List<ListenerInfo>> listeners,
+    EventObject event)
+{
+    //TODO: should possibly check this within thread lock, seems to be ok though without
+    // If dispatch thread is stopped, then ignore dispatch request.
+    if (m_stopping || m_thread == null)
     {
-        // A bundle listener is either synchronous or asynchronous.
-        // If the bundle listener is synchronous, then deliver the
-        // event to bundles with a state of STARTING, STOPPING, or
-        // ACTIVE. If the listener is asynchronous, then deliver the
-        // event only to bundles that are STARTING or ACTIVE.
-        if (((SynchronousBundleListener.class.isAssignableFrom(l.getClass())) &&
-            ((bundle.getState() == Bundle.STARTING) ||
-            (bundle.getState() == Bundle.STOPPING) ||
-            (bundle.getState() == Bundle.ACTIVE)))
-            ||
-            ((bundle.getState() == Bundle.STARTING) ||
-            (bundle.getState() == Bundle.ACTIVE)))
+        return;
+    }
+
+    // First get a request from the pool or create one if necessary.
+    Request req = null;
+    synchronized (m_requestPool)
+    {
+        if (m_requestPool.size() > 0)
         {
-            if (System.getSecurityManager() != null)
-            {
-                AccessController.doPrivileged(new PrivilegedAction() {
-                    @Override
-                    public Object run()
-                    {
-                        ((BundleListener) l).bundleChanged((BundleEvent) event);
-                        return null;
-                    }
-                });
-            }
-            else
-            {
-                ((BundleListener) l).bundleChanged((BundleEvent) event);
-            }
+            req = m_requestPool.remove(0);
+        }
+        else
+        {
+            req = new Request();
         }
     }
 
-    private static void invokeServiceListenerCallback(
-        Bundle bundle, final EventListener l, Filter filter, Object acc,
-        final EventObject event, final Dictionary<String,?> oldProps)
+    // Initialize dispatch request.
+    req.m_dispatcher = dispatcher;
+    req.m_type = type;
+    req.m_listeners = listeners;
+    req.m_event = event;
+
+    // Lock the request list.
+    synchronized (m_requestList)
     {
-        // Service events should be delivered to STARTING,
-        // STOPPING, and ACTIVE bundles.
-        if ((bundle.getState() != Bundle.STARTING) &&
-            (bundle.getState() != Bundle.STOPPING) &&
-            (bundle.getState() != Bundle.ACTIVE))
+        // Add our request to the list.
+        m_requestList.add(req);
+        // Notify the dispatch thread that there is work to do.
+        m_requestList.notify();
+    }
+}
+
+private static void fireEventImmediately(
+    EventDispatcher dispatcher, int type,
+    Map<BundleContext, List<ListenerInfo>> listeners,
+    EventObject event, Dictionary<String,?> oldProps)
+{
+    if (!listeners.isEmpty())
+    {
+        // Notify appropriate listeners.
+        for (Entry<BundleContext, List<ListenerInfo>> entry : listeners.entrySet())
         {
-            return;
-        }
+            for (ListenerInfo info : entry.getValue())
+            {
+                Bundle bundle = info.getBundle();
+                EventListener l = info.getListener();
+                Filter filter = info.getParsedFilter();
+                Object acc = info.getSecurityContext();
 
-        // Check that the bundle has permission to get at least
-        // one of the service interfaces; the objectClass property
-        // of the service stores its service interfaces.
-        ServiceReference<?> ref = ((ServiceEvent) event).getServiceReference();
-
-        boolean hasPermission = true;
-        Object sm = System.getSecurityManager();
-        if ((acc != null) && (sm != null))
-        {
-            try
-            {
-                ServicePermission perm =
-                    new ServicePermission(
-                        ref, ServicePermission.GET);
-                ((SecurityManager) sm).checkPermission(perm, acc);
-            }
-            catch (Exception ex)
-            {
-                hasPermission = false;
-            }
-        }
-
-        if (hasPermission)
-        {
-            // Dispatch according to the filter.
-            boolean matched;
-            if (l instanceof UnfilteredServiceListener)
-            {
-                // An UnfilteredServiceListener always matches, regardless of the filter.
-                // The filter is still passed on to the Service Registry Hooks.
-                matched = true;
-            }
-            else
-            {
-                matched = (filter == null)
-                        || filter.match(((ServiceEvent) event).getServiceReference());
-            }
-
-            if (matched)
-            {
-                if ((l instanceof AllServiceListener) ||
-                    Util.isServiceAssignable(bundle, ((ServiceEvent) event).getServiceReference()))
+                try
                 {
-                    if (System.getSecurityManager() != null)
+                    if (type == Request.FRAMEWORK_EVENT)
                     {
-                        AccessController.doPrivileged(new PrivilegedAction()
-                        {
-                            @Override
-                            public Object run()
-                            {
-                                ((ServiceListener) l).serviceChanged((ServiceEvent) event);
-                                return null;
-                            }
-                        });
+                        invokeFrameworkListenerCallback(bundle, l, event);
                     }
-                    else
+                    else if (type == Request.BUNDLE_EVENT)
                     {
-                        ((ServiceListener) l).serviceChanged((ServiceEvent) event);
+                        invokeBundleListenerCallback(bundle, l, event);
+                    }
+                    else if (type == Request.SERVICE_EVENT)
+                    {
+                        invokeServiceListenerCallback(
+                            bundle, l, filter, acc, event, oldProps);
+                    }
+                }
+                catch (Throwable th)
+                {
+                    if ((type != Request.FRAMEWORK_EVENT)
+                        || (((FrameworkEvent) event).getType() != FrameworkEvent.ERROR))
+                    {
+                        dispatcher.m_logger.log(bundle,
+                            Logger.LOG_ERROR,
+                            "EventDispatcher: Error during dispatch.", th);
+                        dispatcher.fireFrameworkEvent(
+                            new FrameworkEvent(FrameworkEvent.ERROR, bundle, th));
                     }
                 }
             }
-            // We need to send an MODIFIED_ENDMATCH event if the listener
-            // matched previously.
-            else if (((ServiceEvent) event).getType() == ServiceEvent.MODIFIED)
+        }
+    }
+}
+
+private static void invokeFrameworkListenerCallback(
+    Bundle bundle, final EventListener l, final EventObject event)
+{
+    // The spec says only active bundles receive asynchronous events,
+    // but we will include starting bundles too otherwise
+    // it is impossible to see everything.
+    if ((bundle.getState() == Bundle.STARTING) ||
+        (bundle.getState() == Bundle.ACTIVE))
+    {
+        ((FrameworkListener) l).frameworkEvent((FrameworkEvent) event);
+    }
+}
+
+private static void invokeBundleListenerCallback(
+    Bundle bundle, final EventListener l, final EventObject event)
+{
+    // A bundle listener is either synchronous or asynchronous.
+    // If the bundle listener is synchronous, then deliver the
+    // event to bundles with a state of STARTING, STOPPING, or
+    // ACTIVE. If the listener is asynchronous, then deliver the
+    // event only to bundles that are STARTING or ACTIVE.
+    if (((SynchronousBundleListener.class.isAssignableFrom(l.getClass())) &&
+        ((bundle.getState() == Bundle.STARTING) ||
+        (bundle.getState() == Bundle.STOPPING) ||
+        (bundle.getState() == Bundle.ACTIVE)))
+        ||
+        ((bundle.getState() == Bundle.STARTING) ||
+        (bundle.getState() == Bundle.ACTIVE)))
+    {
+        ((BundleListener) l).bundleChanged((BundleEvent) event);
+    }
+}
+
+private static void invokeServiceListenerCallback(
+    Bundle bundle, final EventListener l, Filter filter, Object acc,
+    final EventObject event, final Dictionary<String,?> oldProps)
+{
+    // Service events should be delivered to STARTING,
+    // STOPPING, and ACTIVE bundles.
+    if ((bundle.getState() != Bundle.STARTING) &&
+        (bundle.getState() != Bundle.STOPPING) &&
+        (bundle.getState() != Bundle.ACTIVE))
+    {
+        return;
+    }
+
+    // Check that the bundle has permission to get at least
+    // one of the service interfaces; the objectClass property
+    // of the service stores its service interfaces.
+    ServiceReference<?> ref = ((ServiceEvent) event).getServiceReference();
+
+        // Dispatch according to the filter.
+        boolean matched;
+        if (l instanceof UnfilteredServiceListener)
+        {
+            // An UnfilteredServiceListener always matches, regardless of the filter.
+            // The filter is still passed on to the Service Registry Hooks.
+            matched = true;
+        }
+        else
+        {
+            matched = (filter == null)
+                    || filter.match(((ServiceEvent) event).getServiceReference());
+        }
+
+        if (matched)
+        {
+            if ((l instanceof AllServiceListener) ||
+                Util.isServiceAssignable(bundle, ((ServiceEvent) event).getServiceReference()))
             {
-                if (filter.match(oldProps))
-                {
-                    final ServiceEvent se = new ServiceEvent(
-                        ServiceEvent.MODIFIED_ENDMATCH,
-                        ((ServiceEvent) event).getServiceReference());
-                    if (System.getSecurityManager() != null)
-                    {
-                        AccessController.doPrivileged(new PrivilegedAction()
-                        {
-                            @Override
-                            public Object run()
-                            {
-                                ((ServiceListener) l).serviceChanged(se);
-                                return null;
-                            }
-                        });
-                    }
-                    else
-                    {
-                        ((ServiceListener) l).serviceChanged(se);
-                    }
-                }
+                ((ServiceListener) l).serviceChanged((ServiceEvent) event);
+            }
+        }
+        // We need to send an MODIFIED_ENDMATCH event if the listener
+        // matched previously.
+        else if (((ServiceEvent) event).getType() == ServiceEvent.MODIFIED)
+        {
+            if (filter.match(oldProps))
+            {
+                final ServiceEvent se = new ServiceEvent(
+                    ServiceEvent.MODIFIED_ENDMATCH,
+                    ((ServiceEvent) event).getServiceReference());
+                ((ServiceListener) l).serviceChanged(se);
             }
         }
     }

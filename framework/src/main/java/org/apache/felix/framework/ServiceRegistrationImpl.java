@@ -239,33 +239,7 @@ class ServiceRegistrationImpl<S> implements ServiceRegistration<S>
         // let it create the service object.
         if (m_factory != null)
         {
-            Object svcObj = null;
-            try
-            {
-                if (System.getSecurityManager() != null)
-                {
-                    svcObj = AccessController.doPrivileged(
-                        new ServiceFactoryPrivileged<>(acqBundle, null));
-                }
-                else
-                {
-                    svcObj = getFactoryUnchecked(acqBundle);
-                }
-            }
-            catch (PrivilegedActionException ex)
-            {
-                if (ex.getException() instanceof ServiceException)
-                {
-                    throw (ServiceException) ex.getException();
-                }
-                else
-                {
-                    throw new ServiceException(
-                        "Service factory exception: " + ex.getException().getMessage(),
-                        ServiceException.FACTORY_EXCEPTION, ex.getException());
-                }
-            }
-            return svcObj;
+            return getFactoryUnchecked(acqBundle);
         }
         else
         {
@@ -281,15 +255,7 @@ class ServiceRegistrationImpl<S> implements ServiceRegistration<S>
         {
             try
             {
-                if (System.getSecurityManager() != null)
-                {
-                    AccessController.doPrivileged(
-                        new ServiceFactoryPrivileged<>(relBundle, svcObj));
-                }
-                else
-                {
-                    ungetFactoryUnchecked(relBundle, svcObj);
-                }
+                ungetFactoryUnchecked(relBundle, svcObj);
             }
             catch (Throwable ex)
             {

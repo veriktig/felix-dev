@@ -406,18 +406,6 @@ class ExtensionManager implements Content
      */
     void addExtensionBundle(BundleImpl bundle) throws Exception
     {
-        Object sm = System.getSecurityManager();
-        if (sm != null)
-        {
-            ((SecurityManager) sm).checkPermission(
-                new AdminPermission(bundle, AdminPermission.EXTENSIONLIFECYCLE));
-
-            if (!((BundleProtectionDomain) bundle.getProtectionDomain()).impliesDirect(new AllPermission()))
-            {
-                throw new SecurityException("Extension Bundles must have AllPermission");
-            }
-        }
-
         String directive = ManifestParser.parseExtensionBundleHeader((String)
             ((BundleRevisionImpl) bundle.adapt(BundleRevision.class))
                 .getHeaders().get(Constants.FRAGMENT_HOST));
@@ -579,15 +567,8 @@ class ExtensionManager implements Content
             {
                 try
                 {
-                    AccessController.doPrivileged(new PrivilegedExceptionAction<Void>()
-                    {
-                        @Override
-                        public Void run() throws Exception
-                        {
-                            m_extenderFramework.add(f);
-                            return null;
-                        }
-                    });
+                    m_extenderFramework.add(f);
+                    return null;
                 }
                 catch (Exception ex)
                 {

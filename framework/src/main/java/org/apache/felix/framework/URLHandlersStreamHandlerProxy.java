@@ -176,7 +176,7 @@ public class URLHandlersStreamHandlerProxy extends URLStreamHandler
         }
         try
         {
-            return ((Integer) GET_DEFAULT_PORT.invoke(svc, null));
+            return ((Integer) GET_DEFAULT_PORT.invoke(svc, (Object[])null));
         }
         catch (Exception ex)
         {
@@ -606,10 +606,6 @@ public class URLHandlersStreamHandlerProxy extends URLStreamHandler
                     m_action.getClassLoader(URLStreamHandlerService.class), 
                     new Class[]{URLStreamHandlerService.class},
                     new URLHandlersStreamHandlerProxy(service, m_action));
-        }
-        catch (ThreadDeath td)
-        {
-            throw td;
         }
         catch (Throwable t)
         {

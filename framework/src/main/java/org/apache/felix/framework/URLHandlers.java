@@ -25,6 +25,7 @@ import java.net.URL;
 import java.net.URLConnection;
 import java.net.URLStreamHandler;
 import java.net.URLStreamHandlerFactory;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.StringTokenizer;
 import java.util.concurrent.ConcurrentHashMap;
@@ -34,7 +35,6 @@ import static org.apache.felix.framework.util.Util.putIfAbsentAndReturn;
 
 import org.apache.felix.framework.util.FelixConstants;
 import org.apache.felix.framework.util.SecureAction;
-import org.apache.felix.framework.util.SecurityManagerEx;
 import org.osgi.framework.Constants;
 import org.osgi.service.url.URLStreamHandlerService;
 
@@ -85,7 +85,6 @@ class URLHandlers implements URLStreamHandlerFactory, ContentHandlerFactory
 
     private static final SecureAction m_secureAction = new SecureAction();
 
-    private static volatile SecurityManagerEx m_sm = null;
     private static volatile URLHandlers m_handler = null;
 
     // This maps classloaders of URLHandlers in other classloaders to lists of
@@ -166,7 +165,6 @@ class URLHandlers implements URLStreamHandlerFactory, ContentHandlerFactory
     **/
     private URLHandlers()
     {
-        m_sm = new SecurityManagerEx();
         synchronized (URL.class)
         {
             URLStreamHandlerFactory currentFactory = null;
@@ -346,7 +344,6 @@ class URLHandlers implements URLStreamHandlerFactory, ContentHandlerFactory
         if (!((m_streamHandlerFactory == this) || !URLHANDLERS_CLASS.getName().equals(
             m_streamHandlerFactory.getClass().getName())))
         {
-            m_sm = null;
             m_protocolToURL.clear();
             m_builtIn.clear();
         }
@@ -731,6 +728,17 @@ class URLHandlers implements URLStreamHandlerFactory, ContentHandlerFactory
         }
     }
 
+    private static Class<?>[] getStackClasses() {
+        List<Class<?>> classes = new ArrayList<>();
+        StackWalker walker = StackWalker.getInstance(StackWalker.Option.RETAIN_CLASS_REFERENCE);
+
+        walker.forEach(frame -> {
+            classes.add(frame.getDeclaringClass());
+        });
+
+        return classes.toArray(new Class<?>[0]);
+    }
+
     /**
      * <p>
      * This method returns the system bundle context for the caller.
@@ -761,7 +769,7 @@ class URLHandlers implements URLStreamHandlerFactory, ContentHandlerFactory
         }
 
         // get the current class call stack.
-        Class<?>[] stack = m_sm.getClassContext();
+        Class<?>[] stack = getStackClasses();
         // Find the first class that is loaded from a bundle.
         Class<?> targetClass = null;
         ClassLoader targetClassLoader = null;

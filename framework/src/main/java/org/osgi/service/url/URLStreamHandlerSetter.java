@@ -43,6 +43,7 @@ public interface URLStreamHandlerSetter {
 	 *             for JDK 1.1.
 	 */
 	@SuppressWarnings("javadoc")
+    @Deprecated
 	public void setURL(URL u, String protocol, String host, int port, String file, String ref);
 
 	/**

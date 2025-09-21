@@ -71,12 +71,6 @@ class WovenClassImpl implements WovenClass, List<String>
     @Override
 	public synchronized byte[] getBytes()
     {
-        SecurityManager sm = System.getSecurityManager();
-        if (sm != null)
-        {
-            sm.checkPermission(new AdminPermission(m_wiring.getBundle(),
-                    AdminPermission.WEAVE));
-        }
         byte[] bytes = m_bytes;
         if (m_isComplete)
         {
@@ -89,12 +83,6 @@ class WovenClassImpl implements WovenClass, List<String>
     @Override
 	public synchronized void setBytes(byte[] bytes)
     {
-        SecurityManager sm = System.getSecurityManager();
-        if (sm != null)
-        {
-            sm.checkPermission(new AdminPermission(m_wiring.getBundle(),
-                    AdminPermission.WEAVE));
-        }
         if (m_state >= TRANSFORMED)
         {
             throw new IllegalStateException(
@@ -193,12 +181,6 @@ class WovenClassImpl implements WovenClass, List<String>
     @Override
 	public synchronized boolean add(String s)
     {
-        SecurityManager sm = System.getSecurityManager();
-        if (sm != null)
-        {
-            sm.checkPermission(new AdminPermission(m_wiring.getBundle(),
-                    AdminPermission.WEAVE));
-        }
         if (s != null)
         {
             try
@@ -218,23 +200,11 @@ class WovenClassImpl implements WovenClass, List<String>
 
     private void checkImport(String s)
     {
-        SecurityManager sm = System.getSecurityManager();
-
-        if (sm != null)
-        {
-            sm.checkPermission(new PackagePermission(s, PackagePermission.IMPORT));
-        }
     }
 
     @Override
 	public synchronized boolean remove(Object o)
     {
-        SecurityManager sm = System.getSecurityManager();
-        if (sm != null)
-        {
-            sm.checkPermission(new AdminPermission(m_wiring.getBundle(),
-                    AdminPermission.WEAVE));
-        }
         return m_imports.remove(o);
     }
 
@@ -247,12 +217,6 @@ class WovenClassImpl implements WovenClass, List<String>
     @Override
 	public synchronized boolean addAll(Collection<? extends String> collection)
     {
-        SecurityManager sm = System.getSecurityManager();
-        if (sm != null)
-        {
-            sm.checkPermission(new AdminPermission(m_wiring.getBundle(),
-                    AdminPermission.WEAVE));
-        }
         for (String s : collection)
         {
             try
@@ -273,12 +237,6 @@ class WovenClassImpl implements WovenClass, List<String>
 	public synchronized boolean addAll(int i,
             Collection<? extends String> collection)
     {
-        SecurityManager sm = System.getSecurityManager();
-        if (sm != null)
-        {
-            sm.checkPermission(new AdminPermission(m_wiring.getBundle(),
-                    AdminPermission.WEAVE));
-        }
         for (String s : collection)
         {
             try
@@ -298,36 +256,18 @@ class WovenClassImpl implements WovenClass, List<String>
     @Override
 	public synchronized boolean removeAll(Collection<?> collection)
     {
-        SecurityManager sm = System.getSecurityManager();
-        if (sm != null)
-        {
-            sm.checkPermission(new AdminPermission(m_wiring.getBundle(),
-                    AdminPermission.WEAVE));
-        }
         return m_imports.removeAll(collection);
     }
 
     @Override
 	public synchronized boolean retainAll(Collection<?> collection)
     {
-        SecurityManager sm = System.getSecurityManager();
-        if (sm != null)
-        {
-            sm.checkPermission(new AdminPermission(m_wiring.getBundle(),
-                    AdminPermission.WEAVE));
-        }
         return m_imports.retainAll(collection);
     }
 
     @Override
 	public synchronized void clear()
     {
-        SecurityManager sm = System.getSecurityManager();
-        if (sm != null)
-        {
-            sm.checkPermission(new AdminPermission(m_wiring.getBundle(),
-                    AdminPermission.WEAVE));
-        }
         m_imports.clear();
     }
 
@@ -340,12 +280,6 @@ class WovenClassImpl implements WovenClass, List<String>
     @Override
 	public synchronized String set(int i, String s)
     {
-        SecurityManager sm = System.getSecurityManager();
-        if (sm != null)
-        {
-            sm.checkPermission(new AdminPermission(m_wiring.getBundle(),
-                    AdminPermission.WEAVE));
-        }
         try
         {
             ManifestParser
@@ -362,12 +296,6 @@ class WovenClassImpl implements WovenClass, List<String>
     @Override
 	public synchronized void add(int i, String s)
     {
-        SecurityManager sm = System.getSecurityManager();
-        if (sm != null)
-        {
-            sm.checkPermission(new AdminPermission(m_wiring.getBundle(),
-                    AdminPermission.WEAVE));
-        }
         try
         {
             ManifestParser
@@ -385,12 +313,6 @@ class WovenClassImpl implements WovenClass, List<String>
     @Override
 	public synchronized String remove(int i)
     {
-        SecurityManager sm = System.getSecurityManager();
-        if (sm != null)
-        {
-            sm.checkPermission(new AdminPermission(m_wiring.getBundle(),
-                    AdminPermission.WEAVE));
-        }
         return m_imports.remove(i);
     }
 

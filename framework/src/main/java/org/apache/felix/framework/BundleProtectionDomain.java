@@ -325,20 +325,7 @@ public class BundleProtectionDomain extends ProtectionDomain
         {
             String property;
 
-            if (System.getSecurityManager() != null)
-            {
-                property = AccessController.doPrivileged(new PrivilegedAction<String>(){
-                    @Override
-                    public String run()
-                    {
-                        return getUseCachedURLProperty(revision);
-                    }
-                });
-            }
-            else
-            {
-                property =  getUseCachedURLProperty(revision);
-            }
+            property =  getUseCachedURLProperty(revision);
 
             return Boolean.parseBoolean(property);
         }

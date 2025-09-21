@@ -132,59 +132,6 @@ class URLHandlersBundleStreamHandler extends URLStreamHandler
 
     private boolean checkPermission(URL u)
     {
-        SecurityManager sm = System.getSecurityManager();
-        if (sm != null)
-        {
-            Object framework = m_framework;
-            if (framework == null)
-            {
-                framework = URLHandlers.getFrameworkFromContext(Util.getFrameworkUUIDFromURL(u.getHost()));
-            }
-            try {
-                long bundleId = Util.getBundleIdFromRevisionId(Util.getRevisionIdFromURL(u.getHost()));
-
-                if (framework instanceof Felix)
-                {
-                    Bundle bundle = ((Felix) framework).getBundle(bundleId);
-                    if (bundle != null)
-                    {
-                        sm.checkPermission(new AdminPermission(bundle, AdminPermission.RESOURCE));
-                        return true;
-                    }
-                }
-                else if (framework != null)
-                {
-                    Method method = m_action.getDeclaredMethod(framework.getClass(), "getBundle", new Class[]{long.class});
-                    m_action.setAccesssible(method);
-                    Object bundle = method.invoke(framework, bundleId);
-                    if (bundle != null)
-                    {
-                        ClassLoader loader = m_action.getClassLoader(framework.getClass());
-
-                        sm.checkPermission((Permission) m_action.getConstructor(
-                            loader.loadClass(AdminPermission.class.getName()),
-                            new Class[] {loader.loadClass(Bundle.class.getName()), String.class}).newInstance(bundle, AdminPermission.RESOURCE));
-                        return true;
-                    }
-                }
-                else
-                {
-                    throw new IOException("No framework context found");
-                }
-            }
-            catch (SecurityException ex)
-            {
-                throw ex;
-            }
-            catch (Exception ex)
-            {
-                throw new SecurityException(ex);
-            }
-        }
-        else
-        {
-            return true;
-        }
-        return false;
+        return true;
     }
 }

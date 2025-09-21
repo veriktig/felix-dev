@@ -108,14 +108,6 @@ class FrameworkStartLevelImpl implements FrameworkStartLevel, Runnable
     @Override
 	public void setStartLevel(int startlevel, FrameworkListener... listeners)
     {
-        Object sm = System.getSecurityManager();
-
-        if (sm != null)
-        {
-            ((SecurityManager) sm).checkPermission(
-                new AdminPermission(m_felix, AdminPermission.STARTLEVEL));
-        }
-
         if (startlevel <= 0)
         {
             throw new IllegalArgumentException(
@@ -178,13 +170,6 @@ class FrameworkStartLevelImpl implements FrameworkStartLevel, Runnable
     @Override
 	public void setInitialBundleStartLevel(int startlevel)
     {
-        Object sm = System.getSecurityManager();
-
-        if (sm != null)
-        {
-            ((SecurityManager) sm).checkPermission(
-                new AdminPermission(m_felix, AdminPermission.STARTLEVEL));
-        }
         m_felix.setInitialBundleStartLevel(startlevel);
     }
 
@@ -217,14 +202,6 @@ class FrameworkStartLevelImpl implements FrameworkStartLevel, Runnable
         @Override
 		public void setStartLevel(int startlevel)
         {
-            Object sm = System.getSecurityManager();
-
-            if (sm != null)
-            {
-                ((SecurityManager) sm).checkPermission(
-                    new AdminPermission(m_bundle, AdminPermission.EXECUTE));
-            }
-
             if (m_bundle.getBundleId() == 0)
             {
                 throw new IllegalArgumentException(

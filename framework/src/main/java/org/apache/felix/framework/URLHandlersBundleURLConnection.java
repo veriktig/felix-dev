@@ -245,17 +245,6 @@ class URLHandlersBundleURLConnection extends URLConnection
         return m_contentType;
     }
 
-    @Override
-	public Permission getPermission()
-    {
-        // TODO: SECURITY - This should probably return a FilePermission
-        // to access the bundle JAR file, but we don't have the
-        // necessary information here to construct the absolute
-        // path of the JAR file...so it would take some
-        // re-arranging to get this to work.
-        return null;
-    }
-
     /**
      * Retrieve the entry as a URL using standard protocols such as file: and jar:
      *

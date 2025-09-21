@@ -80,12 +80,6 @@ public class JarContent implements Content
     }
 
     @Override
-	protected void finalize()
-    {
-        close();
-    }
-
-    @Override
 	public void close()
     {
         try

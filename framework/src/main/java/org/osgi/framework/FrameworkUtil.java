@@ -225,9 +225,7 @@ public class FrameworkUtil {
 		// We use doPriv since the caller may not have permission
 		// to call getClassLoader.
 		Optional<ClassLoader> cl = Optional
-				.ofNullable(AccessController.doPrivileged(
-						(PrivilegedAction<ClassLoader>) () -> classFromBundle
-								.getClassLoader()));
+				.ofNullable(classFromBundle .getClassLoader());
 
 		return cl.flatMap(FrameworkUtil::getBundle)
 				.orElseGet(() -> helpers.stream()
@@ -242,12 +240,10 @@ public class FrameworkUtil {
 	static {
 		List<FrameworkUtilHelper> l = new ArrayList<>();
 		try {
-			ServiceLoader<FrameworkUtilHelper> helperLoader = AccessController
-					.doPrivileged(
-							(PrivilegedAction<ServiceLoader<FrameworkUtilHelper>>) () -> ServiceLoader
+			ServiceLoader<FrameworkUtilHelper> helperLoader = ServiceLoader
 									.load(FrameworkUtilHelper.class,
 											FrameworkUtilHelper.class
-													.getClassLoader()));
+													.getClassLoader());
 			helperLoader.forEach(l::add);
 		} catch (Throwable error) {
 			// try hard not to fail static <clinit>

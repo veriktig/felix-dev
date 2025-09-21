@@ -24,7 +24,6 @@ import org.apache.felix.framework.capabilityset.SimpleFilter;
 import org.apache.felix.framework.resolver.ResourceNotFoundException;
 import org.apache.felix.framework.util.CompoundEnumeration;
 import org.apache.felix.framework.util.FelixConstants;
-import org.apache.felix.framework.util.SecurityManagerEx;
 import org.apache.felix.framework.util.Util;
 import org.apache.felix.framework.util.manifestparser.ManifestParser;
 import org.apache.felix.framework.util.manifestparser.NativeLibrary;
@@ -156,9 +155,6 @@ public class BundleWiringImpl implements BundleWiring
     private final boolean m_implicitBootDelegation;
     // Boolean flag to enable/disable local URLs.
     private final boolean m_useLocalURLs;
-
-    // Re-usable security manager for accessing class context.
-    private static SecurityManagerEx m_sm = new SecurityManagerEx();
 
     // Thread local to detect class loading cycles.
     private final ThreadLocal<Set<String>> m_cycleCheck = new ThreadLocal<>();
@@ -381,37 +377,6 @@ public class BundleWiringImpl implements BundleWiring
                                 }
                             }
                         }
-                    }
-                }
-            }
-        }
-
-        if (System.getSecurityManager() != null)
-        {
-            for (Iterator<BundleCapability> iter = capList.iterator(); iter.hasNext();)
-            {
-                BundleCapability cap = iter.next();
-                String bundleNamespace = cap.getNamespace();
-                if (bundleNamespace.isEmpty())
-                {
-                    iter.remove();
-                }
-                else if (bundleNamespace.equals(BundleRevision.PACKAGE_NAMESPACE))
-                {
-                    if (!((BundleProtectionDomain) ((BundleRevisionImpl) cap.getRevision()).getProtectionDomain()).impliesDirect(
-                            new PackagePermission((String) cap.getAttributes().get(BundleRevision.PACKAGE_NAMESPACE), PackagePermission.EXPORTONLY)))
-                    {
-                        iter.remove();
-                    }
-                }
-                else if (!bundleNamespace.equals(BundleRevision.HOST_NAMESPACE)
-                    && !bundleNamespace.equals(BundleRevision.BUNDLE_NAMESPACE)
-                    && !bundleNamespace.equals("osgi.ee"))
-                {
-                    CapabilityPermission permission = new CapabilityPermission(bundleNamespace, CapabilityPermission.PROVIDE);
-                    if (!((BundleProtectionDomain) ((BundleRevisionImpl) cap.getRevision()).getProtectionDomain()).impliesDirect(permission))
-                    {
-                        iter.remove();
                     }
                 }
             }
@@ -1686,6 +1651,17 @@ public class BundleWiringImpl implements BundleWiring
         return tryImplicitBootDelegation(name, isClass);
     }
 
+    private Class<?>[] getStackClasses() {
+        List<Class<?>> classes = new ArrayList<>();
+        StackWalker walker = StackWalker.getInstance(StackWalker.Option.RETAIN_CLASS_REFERENCE);
+
+        walker.forEach(frame -> {
+            classes.add(frame.getDeclaringClass());
+        });
+
+        return classes.toArray(new Class<?>[0]);
+    }
+
     private Object tryImplicitBootDelegation(final String name, final boolean isClass)
             throws ClassNotFoundException, ResourceNotFoundException
     {
@@ -1712,39 +1688,8 @@ public class BundleWiringImpl implements BundleWiring
             // for the bundle and throw an exception.
 
             // Get the class context to see the classes on the stack.
-            final Class<?>[] classes = m_sm.getClassContext();
-            try
-            {
-                if (System.getSecurityManager() != null)
-                {
-                    return AccessController
-                        .doPrivileged(new PrivilegedExceptionAction()
-                        {
-                            @Override
-                            public Object run() throws Exception
-                            {
-                                return doImplicitBootDelegation(classes, name,
-                                        isClass);
-                            }
-                        });
-                }
-                else
-                {
-                    return doImplicitBootDelegation(classes, name, isClass);
-                }
-            }
-            catch (PrivilegedActionException ex)
-            {
-                Exception cause = ex.getException();
-                if (cause instanceof ClassNotFoundException)
-                {
-                    throw (ClassNotFoundException) cause;
-                }
-                else
-                {
-                    throw (ResourceNotFoundException) cause;
-                }
-            }
+            final Class<?>[] classes = getStackClasses();
+            return doImplicitBootDelegation(classes, name, isClass);
         }
         return null;
     }
